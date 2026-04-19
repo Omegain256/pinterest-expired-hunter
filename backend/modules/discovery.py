@@ -24,25 +24,34 @@ def discover_profiles(niche: str, max_results: int = 50) -> list[str]:
 
             for query in queries:
                 print(f"[*] Executing query: {query}")
-                search_url = f"https://html.duckduckgo.com/html/?q={query}"
+                # Use DuckDuckGo Lite (no js required, heavily text based)
+                import urllib.parse
+                encoded_query = urllib.parse.quote_plus(query)
+                search_url = f"https://lite.duckduckgo.com/lite/?q={encoded_query}"
                 page.goto(search_url, timeout=30000, wait_until="domcontentloaded")
+                
+                # Allow minor delay to simulate human load
+                page.wait_for_timeout(2000)
                 
                 # Extract URLs
                 html = page.content()
                 soup = BeautifulSoup(html, "html.parser")
-                for a in soup.find_all('a', class_='result__url'):
+                
+                # Check for rate limiting
+                if "duckduckgo.com" not in page.url and "lite" not in html:
+                    print("  [!] Possible DDG Rate Limit hit.")
+                    
+                for a in soup.find_all('a', class_='result-url'):
                     url = a.get('href', '')
                     if "pinterest.com" in url:
                         url = "http://" + url.strip().split('/')[-1] if not url.startswith("http") else url
                         
                         cleaned_url = url.split("?")[0] # remove query params
-                        # Ensure it points to about
                         if not cleaned_url.endswith("/"):
                             cleaned_url += "/"
-                        if not cleaned_url.endswith("about/"):
-                            cleaned_url += "about/"
                             
                         profiles.add(cleaned_url)
+                        print(f" Found Profile: {cleaned_url}")
                         
                         if len(profiles) >= max_results:
                             break
@@ -55,6 +64,7 @@ def discover_profiles(niche: str, max_results: int = 50) -> list[str]:
         print(f"[!] DDG Playwright Search Error: {e}")
 
     profile_list = list(profiles)
+        
     print(f"[*] Found {len(profile_list)} unique Pinterest profiles to check.")
     return profile_list
 
