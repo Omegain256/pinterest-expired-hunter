@@ -3,6 +3,10 @@ from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from typing import List, Optional
 import os
+from dotenv import load_dotenv
+
+# Load .env file at the very top level
+load_dotenv()
 
 # Import our custom modules
 from modules.discovery import discover_profiles

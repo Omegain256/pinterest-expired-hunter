@@ -5,6 +5,12 @@ echo "======================================"
 echo " Starting Pinterest Hunter Locally! "
 echo "======================================"
 
+# CLEANUP: Kill any zombie processes still hanging on the ports
+echo "[*] Cleaning up existing processes on 8080 and 3000..."
+lsof -ti :8080 | xargs kill -9 2>/dev/null
+lsof -ti :3000 | xargs kill -9 2>/dev/null
+sleep 2
+
 # Start the Python Backend API in the background
 echo "[*] Spinning up Python FastAPI Backend on Port 8080..."
 cd backend || exit
