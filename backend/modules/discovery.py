@@ -25,7 +25,7 @@ def discover_profiles(niche: str, max_results: int = 50) -> list[str]:
         
         run = client.actor("apify/google-search-scraper").call(
             run_input={
-                "queries": [dork_query],
+                "queries": dork_query,
                 "maxPagesPerQuery": (max_results // 10) + 1,
                 "resultsPerPage": min(100, max_results + 10)
             }

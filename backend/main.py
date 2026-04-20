@@ -69,10 +69,13 @@ def run_search(request: SearchRequest):
         domain_data = check_domain_status(website)
         score = score_opportunity(profile_data, domain_data)
         
-        # Keep targets that have dead DNS or Score >= 0 to ensure the user sees results
-        is_viable = score >= 0 or domain_data.get('dns_dead', False)
+        # Filter: ONLY keep if DNS is dead or status is specifically EXPIRED/AVAILABLE
+        # Also ensure it is NOT live (TCP check failed)
+        is_expired = domain_data.get("dns_dead", False) or domain_data.get("status") in ["EXPIRED", "POTENTIALLY_AVAILABLE", "EXPIRING_SOON"]
+        is_live = domain_data.get("is_live", False)
         
-        if is_viable:
+        # WEED OUT ACTIVE DOMAINS RELENTLESSLY
+        if is_expired and not is_live:
             opp = Opportunity(
                 profile_url=profile,
                 linked_website=website,

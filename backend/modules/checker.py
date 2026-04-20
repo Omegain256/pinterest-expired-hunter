@@ -33,6 +33,21 @@ def check_dns(domain: str) -> bool:
     except:
         return True  # Truly dead DNS
 
+def check_http_alive(domain: str) -> bool:
+    """
+    Physically tries to connect to the domain.
+    If it answers on Port 80 or 443, it's NOT expired.
+    """
+    try:
+        # Try Port 80 (HTTP) with a short timeout
+        s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        s.settimeout(2.0)
+        s.connect((domain, 80))
+        s.close()
+        return True
+    except:
+        return False
+
 def check_whois(domain: str) -> dict:
     """
     Returns domain status and age.
@@ -75,12 +90,12 @@ def check_whois(domain: str) -> dict:
         else:
             # If we couldn't parse expiration, and DNS is dead, it MIGHT be available
             if check_dns(domain):
-                result["status"] = "POTENTIALLY_AVAILABLE (Dead DNS)"
+                result["status"] = "POTENTIALLY_AVAILABLE"
             
     except Exception as e:
         print(f"  [!] WHOIS lookup failed for {domain}: {e}")
         if check_dns(domain):
-            result["status"] = "POTENTIALLY_AVAILABLE (Dead DNS)"
+            result["status"] = "POTENTIALLY_AVAILABLE"
 
     return result
 
@@ -88,16 +103,26 @@ def check_domain_status(url: str) -> dict:
     """Facade function for the full checking pipeline."""
     domain = clean_domain(url)
     if not domain:
-        return {"domain": "", "status": "INVALID", "days_left": None, "age_years": 0, "dns_dead": True}
+        return {"domain": "", "status": "INVALID", "days_left": None, "age_years": 0, "dns_dead": True, "is_live": False}
         
     dns_dead = check_dns(domain)
+    # Physical check: if DNS seems alive, check if it actually serves traffic
+    is_live = False
+    if not dns_dead:
+        is_live = check_http_alive(domain)
+        
     whois_data = check_whois(domain)
-    
     whois_data["dns_dead"] = dns_dead
+    whois_data["is_live"] = is_live
     
-    # Override status if DNS is completely dead and Whois is ambiguous
-    if dns_dead and whois_data["status"] == "UNKNOWN":
+    # Final logic: Only mark as active if it's actually live
+    if is_live:
+        whois_data["status"] = "ACTIVE"
+    elif dns_dead and whois_data["status"] == "UNKNOWN":
         whois_data["status"] = "POTENTIALLY_AVAILABLE"
+    elif dns_dead and whois_data["status"] == "ACTIVE":
+         # If DNS is dead but WHOIS says ACTIVE, it's likely a stale WHOIS record or parked without site
+         whois_data["status"] = "POTENTIALLY_AVAILABLE"
 
     return whois_data
 
