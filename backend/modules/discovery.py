@@ -1,25 +1,31 @@
+from apify_client import ApifyClient
+from dotenv import load_dotenv
+
 def discover_profiles(niche: str, max_results: int = 50) -> list[str]:
     """
     Search Google via Apify to find Pinterest profiles.
     """
     profiles = set()
     import os
-    from apify_client import ApifyClient
     
+    # Load environment variables from .env
+    load_dotenv()
     api_token = os.getenv("APIFY_TOKEN")
     
+    print(f"[*] [APIFY-v2] Discovering Pinterest profiles for: '{niche}'")
+    
     if not api_token or api_token == "MISSING":
-        print("[!] ERROR: APIFY_TOKEN environment variable is missing. Search will fail.")
+        print("[!] ERROR: APIFY_TOKEN environment variable is missing in .env. Search will fail.")
         return []
 
     try:
         client = ApifyClient(api_token)
         dork_query = f'site:pinterest.com "about" "website" "{niche}"'
-        print(f"[*] Executing Apify Google Search Scraper: {dork_query}")
+        print(f"[*] [APIFY-v2] Executing Scraper: {dork_query}")
         
         run = client.actor("apify/google-search-scraper").call(
             run_input={
-                "queries": dork_query,
+                "queries": [dork_query],
                 "maxPagesPerQuery": (max_results // 10) + 1,
                 "resultsPerPage": min(100, max_results + 10)
             }
