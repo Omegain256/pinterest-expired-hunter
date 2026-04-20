@@ -65,9 +65,8 @@ def run_search(request: SearchRequest):
         domain_data = check_domain_status(website)
         score = score_opportunity(profile_data, domain_data)
         
-        # User requested tightening scoring limits natively (Score > 50 filter implicitly, or we just rely on score multiplier logic)
-        # We will keep targets that have dead DNS or Score > 30 as a baseline threshold to weed out trash
-        is_viable = score > 30 or domain_data.get('dns_dead', False)
+        # Keep targets that have dead DNS or Score >= 0 to ensure the user sees results
+        is_viable = score >= 0 or domain_data.get('dns_dead', False)
         
         if is_viable:
             opp = Opportunity(

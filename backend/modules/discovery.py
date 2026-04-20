@@ -1,43 +1,53 @@
-import time
-import random
-from bs4 import BeautifulSoup
-from playwright.sync_api import sync_playwright
-
 def discover_profiles(niche: str, max_results: int = 50) -> list[str]:
     """
-    Search DuckDuckGo using Playwright to bypass API blocks.
+    Search Google via Apify to find Pinterest profiles.
     """
     profiles = set()
-    queries = [
-        f'site:pinterest.com "about" "website" "{niche}"',
-    ]
+    import os
+    from apify_client import ApifyClient
     
-    print(f"[*] Discovering Pinterest profiles for niche: '{niche}' using Playwright (DDG)...")
+    api_token = os.getenv("APIFY_TOKEN")
     
-    from googlesearch import search
-    import time
-    
+    if not api_token or api_token == "MISSING":
+        print("[!] ERROR: APIFY_TOKEN environment variable is missing. Search will fail.")
+        return []
+
     try:
-        # Use native Google Dorking
+        client = ApifyClient(api_token)
         dork_query = f'site:pinterest.com "about" "website" "{niche}"'
-        print(f"[*] Executing Google Search: {dork_query}")
+        print(f"[*] Executing Apify Google Search Scraper: {dork_query}")
         
-        # We grab roughly 15 items by default to prevent instant IP ban from Google Captchas
-        for url in search(dork_query, num_results=max_results, sleep_interval=3):
-            if "pinterest.com" in url:
-                url = "http://" + url.strip().split('/')[-1] if not url.startswith("http") else url
-                cleaned_url = url.split("?")[0]
-                if not cleaned_url.endswith("/"):
-                    cleaned_url += "/"
+        run = client.actor("apify/google-search-scraper").call(
+            run_input={
+                "queries": dork_query,
+                "maxPagesPerQuery": (max_results // 10) + 1,
+                "resultsPerPage": min(100, max_results + 10)
+            }
+        )
+        
+        items = client.dataset(run["defaultDatasetId"]).list_items().items
+        urls = [item.get("url") for item in items[0].get("organicResults", [])] if items else []
+        
+        for url in urls:
+            if "pinterest.com/" in url:
+                # Standardize to just the profile root URL
+                # e.g., 'https://www.pinterest.com/cattydot/fitness-website/' -> 'cattydot'
+                try:
+                    username = url.split("pinterest.com/")[1].split("/")[0]
+                    if username in ["pin", "ideas", "search", "explore"]:
+                        continue # Ignore system pages
                     
-                profiles.add(cleaned_url)
-                print(f" Found Profile: {cleaned_url}")
-                
+                    cleaned_url = f"https://www.pinterest.com/{username}/"
+                    profiles.add(cleaned_url)
+                    print(f" Found Profile: {cleaned_url}")
+                except Exception:
+                    continue
+                    
             if len(profiles) >= max_results:
                 break
                 
     except Exception as e:
-        print(f"[!] Google Search Error: {e}")
+        print(f"[!] Apify API Error: {e}")
 
     profile_list = list(profiles)
     print(f"[*] Found {len(profile_list)} authentic Pinterest profiles to check.")
