@@ -1,28 +1,28 @@
+import os
 from apify_client import ApifyClient
 from dotenv import load_dotenv
+from urllib.parse import urlparse
+
+def get_apify_client():
+    load_dotenv()
+    api_token = os.getenv("APIFY_TOKEN")
+    if not api_token or api_token == "MISSING":
+        print("[!] ERROR: APIFY_TOKEN missing in .env")
+        return None
+    return ApifyClient(api_token)
 
 def discover_profiles(niche: str, max_results: int = 50) -> list[str]:
     """
     Search Google via Apify to find Pinterest profiles.
     """
     profiles = set()
-    import os
-    
-    # Load environment variables from .env
-    load_dotenv()
-    api_token = os.getenv("APIFY_TOKEN")
-    
-    print(f"[*] [APIFY-v2] Discovering Pinterest profiles for: '{niche}'")
-    
-    if not api_token or api_token == "MISSING":
-        print("[!] ERROR: APIFY_TOKEN environment variable is missing in .env. Search will fail.")
-        return []
+    client = get_apify_client()
+    if not client: return []
+
+    print(f"[*] [GOOGLE-GSS] Discovering Pinterest profiles for: '{niche}'")
 
     try:
-        client = ApifyClient(api_token)
         dork_query = f'site:pinterest.com "about" "website" "{niche}"'
-        print(f"[*] [APIFY-v2] Executing Scraper: {dork_query}")
-        
         run = client.actor("apify/google-search-scraper").call(
             run_input={
                 "queries": dork_query,
@@ -32,34 +32,71 @@ def discover_profiles(niche: str, max_results: int = 50) -> list[str]:
         )
         
         items = client.dataset(run["defaultDatasetId"]).list_items().items
-        urls = [item.get("url") for item in items[0].get("organicResults", [])] if items else []
+        # Organic results are often inside items[0]
+        result_set = items[0].get("organicResults", []) if items else []
         
-        for url in urls:
+        for item in result_set:
+            url = item.get("url", "")
             if "pinterest.com/" in url:
-                # Standardize to just the profile root URL
-                # e.g., 'https://www.pinterest.com/cattydot/fitness-website/' -> 'cattydot'
                 try:
-                    username = url.split("pinterest.com/")[1].split("/")[0]
-                    if username in ["pin", "ideas", "search", "explore"]:
-                        continue # Ignore system pages
+                    parts = url.split("pinterest.com/")[1].split("/")
+                    username = parts[0]
+                    if username in ["pin", "ideas", "search", "explore", "business"]:
+                        continue
                     
                     cleaned_url = f"https://www.pinterest.com/{username}/"
                     profiles.add(cleaned_url)
-                    print(f" Found Profile: {cleaned_url}")
-                except Exception:
-                    continue
+                except: continue
                     
-            if len(profiles) >= max_results:
-                break
+            if len(profiles) >= max_results: break
                 
     except Exception as e:
-        print(f"[!] Apify API Error: {e}")
+        print(f"[!] Apify Google Search Error: {e}")
 
     profile_list = list(profiles)
-    print(f"[*] Found {len(profile_list)} authentic Pinterest profiles to check.")
+    print(f"[*] Found {len(profile_list)} unique profiles.")
     return profile_list
 
-if __name__ == "__main__":
-    found = discover_profiles("fitness", max_results=10)
-    for p in found:
-        print(p)
+def discover_domains_from_pins(niche: str, max_results: int = 50) -> list[dict]:
+    """
+    Search Pinterest Pins via Apify and extract unique destination domains.
+    Returns a list of dicts: {'domain': str, 'profile_url': str}
+    """
+    client = get_apify_client()
+    if not client: return []
+
+    print(f"[*] [PINTEREST-NATIVE] Discovering Pins for: '{niche}'")
+    domains_found = {} # domain -> profile_url
+
+    try:
+        # Use apify/pinterest-scraper for native search
+        run = client.actor("apify/pinterest-scraper").call(
+            run_input={
+                "searchKeywords": niche,
+                "maxPins": max_results * 2, # Scrape more pins because many share domains
+                "proxyConfiguration": {"useApifyProxy": True}
+            }
+        )
+        
+        items = client.dataset(run["defaultDatasetId"]).list_items().items
+        
+        for item in items:
+            link = item.get("link") or item.get("destinationUrl")
+            if not link or "pinterest.com" in link: continue
+            
+            # Extract domain
+            try:
+                parsed = urlparse(link)
+                domain = parsed.netloc.replace("www.", "").lower()
+                if domain and domain not in domains_found:
+                    domains_found[domain] = item.get("link") or f"https://www.pinterest.com/pin/{item.get('id')}/"
+                    print(f" New Domain found from Pin: {domain}")
+            except: continue
+            
+            if len(domains_found) >= max_results: break
+            
+    except Exception as e:
+        print(f"[!] Apify Pinterest Search Error: {e}")
+
+    # Convert to the expected format for main.py
+    return [{"domain": d, "profile_url": p} for d, p in domains_found.items()]

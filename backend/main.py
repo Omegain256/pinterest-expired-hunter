@@ -9,7 +9,7 @@ from dotenv import load_dotenv
 load_dotenv()
 
 # Import our custom modules
-from modules.discovery import discover_profiles
+from modules.discovery import discover_profiles, discover_domains_from_pins
 from modules.extractor import extract_profile_data
 from modules.checker import check_domain_status
 from modules.scorer import score_opportunity
@@ -27,7 +27,9 @@ app.add_middleware(
 
 class SearchRequest(BaseModel):
     niche: str
-    max_results: int = 10
+    max_results: int = 20
+    mode: str = "profiles" # 'profiles' or 'pins'
+    min_followers: int = 0
 
 class Opportunity(BaseModel):
     profile_url: str
@@ -46,39 +48,55 @@ class SearchResponse(BaseModel):
 
 @app.get("/")
 def read_root():
-    return {"status": "Pinterest Hunter Backend is Running", "version": "1.0"}
+    return {"status": "Pinterest Hunter Backend is Running", "version": "2.0-Multisource"}
 
 @app.post("/api/search", response_model=SearchResponse)
 def run_search(request: SearchRequest):
-    print(f"[*] Starting API search for niche: {request.niche}")
+    print(f"[*] Starting API search for niche: {request.niche} [Mode: {request.mode}]")
     
-    profiles = discover_profiles(request.niche, max_results=request.max_results)
+    # Mode 1: Search Profiles (Google Dorking)
+    if request.mode == "profiles" or request.mode == "both":
+        raw_targets = [{"url": p, "domain": None} for p in discover_profiles(request.niche, max_results=request.max_results)]
+    # Mode 2: Search Pin Links (Native Pinterest)
+    else:
+        # returns list of {'domain': str, 'profile_url': str}
+        raw_targets = [{"url": t['profile_url'], "domain": t['domain']} for t in discover_domains_from_pins(request.niche, max_results=request.max_results)]
     
-    if not profiles:
-        return SearchResponse(status="success", results=[], message="No profiles found.")
+    if not raw_targets:
+        return SearchResponse(status="success", results=[], message="No results found.")
 
     valid_opportunities = []
 
-    for profile in profiles:
-        profile_data = extract_profile_data(profile)
-        website = profile_data.get("website")
+    for target in raw_targets:
+        profile_url = target["url"]
+        
+        # 1. Extraction (Scrape Pinterest Profile)
+        profile_data = extract_profile_data(profile_url)
+        
+        # Apply min_followers filter
+        if profile_data.get("followers", 0) < request.min_followers:
+            print(f"  [>] Skipping {profile_url}: Too few followers ({profile_data.get('followers')})")
+            continue
+
+        # Determine target website
+        # If we came from Pin-Mode, we already have the domain. If not, extract it.
+        website = target.get("domain") or profile_data.get("website")
         
         if not website:
             continue
             
+        # 2. Check & Score
         domain_data = check_domain_status(website)
         score = score_opportunity(profile_data, domain_data)
         
         # Filter: ONLY keep if DNS is dead or status is specifically EXPIRED/AVAILABLE
-        # Also ensure it is NOT live (TCP check failed)
         is_expired = domain_data.get("dns_dead", False) or domain_data.get("status") in ["EXPIRED", "POTENTIALLY_AVAILABLE", "EXPIRING_SOON"]
         is_live = domain_data.get("is_live", False)
         
-        # WEED OUT ACTIVE DOMAINS RELENTLESSLY
         if is_expired and not is_live:
             opp = Opportunity(
-                profile_url=profile,
-                linked_website=website,
+                profile_url=profile_url,
+                linked_website=domain_data.get("domain", website),
                 domain_status=domain_data.get("status", "UNKNOWN"),
                 dns_dead=domain_data.get("dns_dead", False),
                 followers=profile_data.get("followers", 0),
