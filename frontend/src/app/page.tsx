@@ -183,7 +183,9 @@ export default function Home() {
           {(!loading && results.length === 0 && !error) && (
             <div className="text-center py-20 opacity-50">
                <span className="text-6xl mb-4 block">🔍</span>
-               <p className="text-slate-400">Run a search to find your first dead domain.</p>
+               <p className="text-slate-400">
+                  {niche ? `0 Domain Opportunities found for '${niche}'. Try expanding your search or wait 5 minutes if rate-limited by search engines.` : "Run a search to find your first dead domain."}
+               </p>
             </div>
           )}
         </div>
